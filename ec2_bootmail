@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# KEYWORD: firstboot
+# PROVIDE: ec2_bootmail
+# REQUIRE: mail
+
+# Define ec2_bootmail_enable=YES in /etc/rc.conf to enable sending an
+# instance-launched email when the system first boots.
+: ${ec2_bootmail_enable=NO}
+
+. /etc/rc.subr
+
+name="ec2_bootmail"
+rcvar=ec2_bootmail_enable
+start_cmd="ec2_bootmail_run"
+stop_cmd=":"
+
+ec2_bootmail_run()
+{
+
+	(
+		echo "To: ${ec2_bootmail_addr}"
+		echo "From: EC2 Instance <root@localhost>"
+		echo "Subject: Instance launch"
+		echo
+		uname -a
+		echo "Instance type: `fetch -qo - http://169.254.169.254/latest/meta-data/instance-type`"
+	) | sendmail -t
+}
+
+load_rc_config $name
+run_rc_command "$1"

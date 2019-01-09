@@ -1,0 +1,56 @@
+#!/bin/sh
+
+# KEYWORD: firstboot
+# PROVIDE: ec2_fetchkey
+# REQUIRE: NETWORKING
+# BEFORE: LOGIN
+
+# Define ec2_fetchkey_enable=YES in /etc/rc.conf to enable SSH key fetching
+# when the system first boots.
+: ${ec2_fetchkey_enable=NO}
+
+# Set ec2_fetchkey_user to change the user for which SSH keys are provided.
+: ${ec2_fetchkey_user=ec2-user}
+
+. /etc/rc.subr
+
+name="ec2_fetchkey"
+rcvar=ec2_fetchkey_enable
+start_cmd="ec2_fetchkey_run"
+stop_cmd=":"
+
+SSHKEYURL="http://169.254.169.254/1.0/meta-data/public-keys/0/openssh-key"
+
+ec2_fetchkey_run()
+{
+	# If the user does not exist, create it.
+	if ! grep -q "^${ec2_fetchkey_user}:" /etc/passwd; then
+		echo "Creating user ${ec2_fetchkey_user}"
+		pw useradd ${ec2_fetchkey_user} -m -G wheel
+	fi
+
+	# Figure out where the SSH public key needs to go.
+	eval SSHKEYFILE="~${ec2_fetchkey_user}/.ssh/authorized_keys"
+
+	# Grab the provided SSH public key and add it to the
+	# right authorized_keys file to allow it to be used to
+	# log in as the specified user.
+	echo "Fetching SSH public key for ${ec2_fetchkey_user}"
+	mkdir -p `dirname ${SSHKEYFILE}`
+	chmod 700 `dirname ${SSHKEYFILE}`
+	chown ${ec2_fetchkey_user} `dirname ${SSHKEYFILE}`
+	ftp -o ${SSHKEYFILE}.ec2 -a ${SSHKEYURL} >/dev/null
+	if [ -f ${SSHKEYFILE}.ec2 ]; then
+		touch ${SSHKEYFILE}
+		sort -u ${SSHKEYFILE} ${SSHKEYFILE}.ec2		\
+		    > ${SSHKEYFILE}.tmp
+		mv ${SSHKEYFILE}.tmp ${SSHKEYFILE}
+		chown ${ec2_fetchkey_user} ${SSHKEYFILE}
+		rm ${SSHKEYFILE}.ec2
+	else
+		echo "Fetching SSH public key failed!"
+	fi
+}
+
+load_rc_config $name
+run_rc_command "$1"

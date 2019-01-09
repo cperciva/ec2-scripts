@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# PROVIDE: ec2_loghostkey
+# REQUIRE: sshd
+
+# Define ec2_loghostkey_enable in /etc/rc.conf to enable printing of the
+# SSH host keys in the EC2 console output format.
+#
+: ${ec2_loghostkey_enable=NO}
+
+. /etc/rc.subr
+
+name="ec2_loghostkey"
+rcvar=ec2_loghostkey_enable
+start_cmd="ec2_loghostkey_run"
+stop_cmd=":"
+
+ec2_loghostkey_run()
+{
+	# Print the SSH host keys in EC2-standard format.
+	echo '#############################################################' | logger -s -t 'ec2'
+	echo '-----BEGIN SSH HOST KEY FINGERPRINTS-----' | logger -s -t 'ec2'
+	for F in /etc/ssh/ssh_host_*key.pub; do
+		ssh-keygen -l -f $F | logger -s -t 'ec2'
+	done
+	echo '-----END SSH HOST KEY FINGERPRINTS-----' | logger -s -t 'ec2'
+	echo '#############################################################' | logger -s -t 'ec2'
+}
+
+load_rc_config $name
+run_rc_command "$1"

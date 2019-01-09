@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# KEYWORD: firstboot
+# PROVIDE: ec2_configinit
+# REQUIRE: NETWORKING
+# BEFORE: SERVERS ec2_fetchkey firstboot_freebsd_update firstboot_pkgs
+
+# Define ec2_configinit_enable=YES in /etc/rc.conf to enable automatic
+# system configuration from EC2 user-data when the system first boots.
+: ${ec2_configinit_enable=NO}
+
+. /etc/rc.subr
+
+name="ec2_configinit"
+rcvar=ec2_configinit_enable
+start_cmd="ec2_configinit_run"
+stop_cmd=":"
+
+CONFIGURL="http://169.254.169.254/latest/user-data"
+
+ec2_configinit_run()
+{
+	# Download to a temporary location.
+	echo -n "Fetching EC2 user-data"
+	CONFFILE=`mktemp "${TMPDIR:-/tmp}/configinit.XXXXXX"`
+	fetch -o ${CONFFILE} ${CONFIGURL} 2>/dev/null
+
+	# If we succeeded, process it; otherwise report failure.
+	if [ $? = 0 ]; then
+		# Process the user-data.
+		echo .
+		echo -n "Processing EC2 user-data"
+		/usr/local/sbin/configinit $CONFFILE
+		echo .
+	else
+		echo " failed."
+	fi
+
+	# Whether we suceeded or not, delete the temporary file.
+	rm $CONFFILE
+
+	# Signal /etc/rc to reload rc.conf in case it changed.
+	kill -ALRM $$
+}
+
+load_rc_config $name
+run_rc_command "$1"
