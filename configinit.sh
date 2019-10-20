@@ -47,5 +47,5 @@ tar -xf ${CONFDATA} -C ${D}
 find ${D} -type f |
     sort |
     while read F; do
-	sh $0 ${F}
+	sh -e $0 ${F}
 done
