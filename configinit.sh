@@ -2,14 +2,14 @@
 
 # Check parameters.
 if [ $# -ne 1 ]; then
-	echo "usage: configinit configdata"
+	echo "usage: configinit configdata" >&2
 	exit 1
 fi
 CONFDATA=$1
 
 # Check that the file exists.
 if ! [ -f ${CONFDATA} ]; then
-	echo "Config file does not exist: ${CONFDATA}"
+	echo "Config file does not exist: ${CONFDATA}" >&2
 	exit 1
 fi
 
