@@ -15,16 +15,22 @@ rcvar=ec2_loghostkey_enable
 start_cmd="ec2_loghostkey_run"
 stop_cmd=":"
 
-ec2_loghostkey_run()
+ec2_loghostkey_generate()
 {
 	# Print the SSH host keys in EC2-standard format.
-	echo '#############################################################' | logger -s -t 'ec2'
-	echo '-----BEGIN SSH HOST KEY FINGERPRINTS-----' | logger -s -t 'ec2'
+	echo '#############################################################'
+	echo '-----BEGIN SSH HOST KEY FINGERPRINTS-----'
 	for F in /etc/ssh/ssh_host_*key.pub; do
-		ssh-keygen -l -f $F | logger -s -t 'ec2'
+		ssh-keygen -l -f $F
 	done
-	echo '-----END SSH HOST KEY FINGERPRINTS-----' | logger -s -t 'ec2'
-	echo '#############################################################' | logger -s -t 'ec2'
+	echo '-----END SSH HOST KEY FINGERPRINTS-----'
+	echo '#############################################################'
+}
+
+ec2_loghostkey_run()
+{
+	# Prefix everything with "ec2:"
+	ec2_loghostkey_generate | lam -s "ec2: " -
 }
 
 load_rc_config $name
