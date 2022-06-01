@@ -1,0 +1,207 @@
+#!/bin/sh
+
+# PROVIDE: ec2_ephemeral_swap
+# REQUIRE: devd
+# BEFORE: savecore
+# BEFORE: ec2_ephemeral_diskseen
+
+# Define ec2_ephemeral_swap_enable=YES in /etc/rc.conf to enable slicing
+# of the ephemeral disks to create swap space when the system next boots.
+#
+# Define ec2_ephemeral_swap_size=N in /etc/rc.conf to use N MB of swap space
+# instead of auto-sizing based on the amount of RAM.
+#
+: ${ec2_ephemeral_swap_enable=NO}
+: ${ec2_ephemeral_swap_size=AUTO}
+
+. /etc/rc.subr
+
+name="ec2_ephemeral_swap"
+rcvar=${name}_enable
+start_cmd="${name}_run"
+stop_cmd=":"
+
+ec2_ephemeral_swap_run()
+{
+	local RAM RAMMB SWAPMB MAXPAGES PAGESZ MAXSWAPMB SWAPLIMITMB
+	local EC2DISKSEEN EC2DISKS NEWSWAPDISKS OLDSWAPDISKS NSWAPDISKS
+	local EC2DISK SWAPDISK SWAPPERDISK DISKSZ SKIPLEN DISKSZMB SWAPSZ
+
+	# Compute "ideal" swap size:
+	#     2*RAM if RAM <= 4 GB
+	#     8 GB  if 4 GB <= RAM <= 8 GB
+	#     RAM   if 8 GB <= RAM
+	RAM=`sysctl -n hw.physmem`
+	RAMMB=`expr $RAM / 1048576`
+	if [ $RAMMB -lt 4096 ]; then
+		SWAPMB=`expr $RAMMB \* 2`
+	elif [ $RAMMB -lt 8192 ]; then
+		SWAPMB=8192
+	else
+		SWAPMB=$RAMMB
+	fi
+	debug "Predicted ideal swap size is $SWAPMB MB"
+
+	# If a target swap size was specified, use that instead of
+	# our "ideal" value.
+	case ${ec2_ephemeral_swap_size} in
+	[Aa][Uu][Tt][Oo])
+		;;
+	*)
+		SWAPMB=${ec2_ephemeral_swap_size}
+		;;
+	esac
+	debug "Target swap size is $SWAPMB MB"
+
+	# Reduce this size if the kernel hasn't reserved enough space to
+	# keep track of that much swap.
+	MAXPAGES=`sysctl -n vm.swap_maxpages`
+	PAGESZ=`sysctl -n hw.pagesize`
+	MAXSWAPMB=$((MAXPAGES * PAGESZ / 1048576))
+	SWAPLIMITMB=$((MAXSWAPMB / 2))
+	if [ $SWAPLIMITMB -lt $SWAPMB ]; then
+		echo -n "Reducing ephemeral swap target from $SWAPMB MB to"
+		echo " $SWAPLIMITMB MB due to kernel swap_maxpages limit."
+		SWAPMB=$SWAPLIMITMB
+	fi
+
+	# Get a list of "previously seen" disks.  We won't allocate swap
+	# partitions on these disks, in case they're already being used.
+	# (If we boot and find "new" ephemeral disks, it should be safe
+	# to use those, since there isn't time for anything else to use
+	# those disks before us.)
+	#
+	# This list is populated by the ec2_ephemeral_diskseen script,
+	# which is enabled by default in order to avoid problems if a
+	# system boots with ec2_ephemeral_swap disabled, a disk gets used,
+	# and then the system reboots with ec2_ephemeral_swap enabled.
+	if [ -f /var/db/ec2_ephemeral_diskseen ]; then
+		EC2DISKSEEN=`cat /var/db/ec2_ephemeral_diskseen`
+	else
+		echo -n "Disabling EC2 ephemeral swap since"
+		echo " ec2_ephemeral_diskseen not initialized"
+		return 0
+	fi
+
+	# Get a list of EC2 ephemeral disks.
+	EC2DISKS=`ls /dev/aws/disk/ephemeral`
+	debug "EC2 ephemeral disks are $EC2DISKS"
+
+	# Decide whether we should use each of them.
+	NEWSWAPDISKS=""
+	OLDSWAPDISKS=""
+	NSWAPDISKS=0
+	for EC2DISK in $EC2DISKS; do
+		# Did we see this disk last time we booted?
+		case $EC2DISKSEEN in
+		*$EC2DISK* )
+			debug "EC2 ephemeral disk seen before: $EC2DISK"
+
+			# Only use this disk if it already has swap configured.
+			if [ -c /dev/gpt/ephemeral_swap-$EC2DISK ]; then
+				debug "Already has ephemeral swap: $EC2DISK"
+				NSWAPDISKS=$(($NSWAPDISKS + 1))
+			fi
+			;;
+		*)
+			debug "New EC2 ephemeral disk found: $EC2DISK"
+
+			# Translate to device name.
+			SWAPDISK=`realpath /dev/aws/disk/ephemeral/$EC2DISK`
+
+			# Paranoia: Make sure the first and last 4k of the
+			# disk are zeroed; Nitro does this for "new" ephemeral
+			# disks and most uses of the disk will result in one
+			# or both of those being modified.
+			DISKSZ=`diskinfo ${SWAPDISK} | awk '{ print $3 }'`
+			SKIPLEN=$((DISKSZ / 4096 - 1))
+			HS=`dd if=$SWAPDISK bs=4k count=1 status=none | sha256`
+			HE=`dd if=$SWAPDISK bs=4k count=1 skip=${SKIPLEN} status=none | sha256`
+			if [ $HS = "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7" ] &&
+			   [ $HE = "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7" ]; then
+				NEWSWAPDISKS="$NEWSWAPDISKS $EC2DISK:$SWAPDISK"
+				NSWAPDISKS=$(($NSWAPDISKS + 1))
+			else
+				echo "New ephemeral disk $EC2DISK is not zeroed!"
+			fi
+			;;
+		esac
+	done
+
+	# If we have no ephemeral disks, give up.
+	if [ $NSWAPDISKS -eq 0 ]; then
+		echo -n "No ephemeral disks are available,"
+		echo " so no swap space is being created."
+		return 0
+	fi
+
+	# How much swap space do we want per disk?
+	SWAPPERDISK=`expr $SWAPMB / $NSWAPDISKS`
+
+	# NOTE: FreeBSD 12.x and earlier have limits on the size of each
+	# swap device; the kernel will automatically reduce the amount of
+	# swap used on oversized devices.  We could impose the limit here,
+	# and potentially save some GB of disk space (by making sure that
+	# we don't create swap partitions which will only be partially
+	# used); but most EC2 instance types won't trip over this anyway.
+
+	debug "Want $SWAPPERDISK MB swap on each of $NSWAPDISKS disks"
+	debug "Initializing disks: $NEWSWAPDISKS"
+
+	# Create swap partitions and label them as ephemeral_swap-foo
+	for DISK in $NEWSWAPDISKS; do
+		# Extract EC2 and local device names
+		EC2DISK=${DISK%%\:*}
+		SWAPDISK=${DISK##*\:}
+
+		# Check if the disks are too small for the desired amount of
+		# swap space.  Reduce "disk size" by 10 MB to account for
+		# partitioning overhead.
+		DISKSZ=`diskinfo ${SWAPDISK} | awk '{ print $3 }'`
+		DISKSZMB=$((DISKSZ / 1024 / 1024 - 10))
+		if [ $DISKSZMB -gt $SWAPPERDISK ]; then
+			SWAPSZ=$SWAPPERDISK
+		else
+			debug "Reducing swap on $SWAPDISK to ${DISKSZMB}MB to fit"
+			SWAPSZ=$DISKSZMB
+		fi
+
+		# Create the swap partition
+		gpart create -s GPT $SWAPDISK
+		gpart add -t freebsd-swap -s ${SWAPSZ}M \
+		    -l ephemeral_swap-$EC2DISK $SWAPDISK
+	done
+
+	# Turn on swap on all the ephemeral disks which have swap partitions.
+	for EC2DISK in $EC2DISKS; do
+		if [ -c /dev/gpt/ephemeral_swap-$EC2DISK ]; then
+			# Enable swap on this disk
+			echo "Enabling swapping to /dev/gpt/ephemeral_swap-$EC2DISK"
+			swapon /dev/gpt/ephemeral_swap-$EC2DISK
+		fi
+	done
+
+	# Turn on dumping, if ${dumpdev} is AUTO (the dumpon rc.d script runs
+	# before us in the boot order, so we duplicate here some of the work
+	# that script does).
+	case ${dumpdev} in
+	[Aa][Uu][Tt][Oo])
+		for EC2DISK in $EC2DISKS; do
+			# Skip if this is not a disk we're swapping to.
+			if ! [ -c /dev/gpt/ephemeral_swap-$EC2DISK ]; then
+				continue;
+			fi
+
+			# If we don't have a dump disk yet, use this one.
+			if ! [ -e /dev/dumpdev ]; then
+				echo "Enabling crash dumps to /dev/gpt/ephemeral_swap-$EC2DISK"
+				dumpon /dev/gpt/ephemeral_swap-$EC2DISK
+				ln -sf /dev/gpt/ephemeral_swap-$EC2DISK /dev/dumpdev
+			fi
+		done
+		;;
+	esac
+}
+
+load_rc_config $name
+run_rc_command "$1"
