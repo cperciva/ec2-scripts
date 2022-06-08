@@ -114,9 +114,9 @@ ec2_ephemeral_swap_run()
 			# disks and most uses of the disk will result in one
 			# or both of those being modified.
 			DISKSZ=`diskinfo ${SWAPDISK} | awk '{ print $3 }'`
-			SKIPLEN=$((DISKSZ / 4096 - 1))
+			SKIPLEN=$((DISKSZ / 512 - 8))
 			HS=`dd if=$SWAPDISK bs=4k count=1 status=none | sha256`
-			HE=`dd if=$SWAPDISK bs=4k count=1 skip=${SKIPLEN} status=none | sha256`
+			HE=`dd if=$SWAPDISK bs=512 count=8 skip=${SKIPLEN} status=none | sha256`
 			if [ $HS = "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7" ] &&
 			   [ $HE = "ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7" ]; then
 				NEWSWAPDISKS="$NEWSWAPDISKS $EC2DISK:$SWAPDISK"
