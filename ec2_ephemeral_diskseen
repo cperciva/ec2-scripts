@@ -29,6 +29,9 @@ ec2_ephemeral_diskseen_run()
 	# the disks by running ebsnvme-id ourselves.
 	: > /var/db/ec2_ephemeral_diskseen
 	for DISK in `ls /dev/nda* /dev/nvd*`; do
+		if [ -L $DISK ]; then
+			continue
+		fi
 		case `${EBSNVMEID} -m $DISK 2>/dev/null` in
 		"Amazon EC2 NVMe Instance Storage")
 			${EBSNVMEID} -s $DISK >> /var/db/ec2_ephemeral_diskseen
