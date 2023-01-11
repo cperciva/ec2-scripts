@@ -36,10 +36,10 @@ ec2_configinit_run()
         # If we get here, chances are high that the user has disabled IMDSv1
         # As such let's attempt to use it
         pkg install -y curl
-        TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+        TOKEN=`/usr/local/bin/curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
 
         # Now attempt to fetch the user-data again with the appropriate token
-        curl -o ${CONFFILE} -H "X-aws-ec2-metadata-token: ${TOKEN}" -v ${CONFIGURL}
+        /usr/local/bin/curl -o ${CONFFILE} -H "X-aws-ec2-metadata-token: ${TOKEN}" -v ${CONFIGURL}
         if [ $? = 0 ]; then
             # Process the user-data.
             echo .

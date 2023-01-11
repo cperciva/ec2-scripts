@@ -51,8 +51,8 @@ ec2_fetchkey_run()
         # If we get here there is a likely-hood this is
         # due to IMDSv2, so let's try with IMDSv2 auth
         pkg install -y curl
-        TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-        curl -H "X-aws-ec2-metadata-token: $TOKEN" -o ${SSHKEYFILE}.ec2 ${SSHKEYURL} >/dev/null
+        TOKEN=`/usr/local/bin/curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+        /usr/local/bin/curl -H "X-aws-ec2-metadata-token: $TOKEN" -o ${SSHKEYFILE}.ec2 ${SSHKEYURL} >/dev/null
         if [ -f ${SSHKEYFILE}.ec2 ]; then
     		touch ${SSHKEYFILE}
     		sort -u ${SSHKEYFILE} ${SSHKEYFILE}.ec2		\
