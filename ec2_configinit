@@ -16,14 +16,16 @@ rcvar=ec2_configinit_enable
 start_cmd="ec2_configinit_run"
 stop_cmd=":"
 
-CONFIGURL="http://169.254.169.254/latest/user-data"
+CONFIGURL="latest/user-data"
 
 ec2_configinit_run()
 {
 	# Download to a temporary location.
 	echo -n "Fetching EC2 user-data"
 	CONFFILE=`mktemp "${TMPDIR:-/tmp}/configinit.XXXXXX"`
-	fetch -o ${CONFFILE} ${CONFIGURL} 2>/dev/null
+	# Instead of using fetch use our new tool
+	# This will handle imds v1 vs v2
+	/usr/local/bin/aws-ec2-imdsv2-get ${CONFIGURL} > ${CONFFILE} 2>/dev/null
 
 	# If we succeeded, process it; otherwise report failure.
 	if [ $? = 0 ]; then
@@ -32,23 +34,6 @@ ec2_configinit_run()
 		echo -n "Processing EC2 user-data"
 		/usr/local/sbin/configinit $CONFFILE
 		echo .
-	else
-        # If we get here, chances are high that the user has disabled IMDSv1
-        # As such let's attempt to use it
-        pkg install -y curl
-        TOKEN=`/usr/local/bin/curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-
-        # Now attempt to fetch the user-data again with the appropriate token
-        /usr/local/bin/curl -o ${CONFFILE} -H "X-aws-ec2-metadata-token: ${TOKEN}" -v ${CONFIGURL}
-        if [ $? = 0 ]; then
-            # Process the user-data.
-            echo .
-            echo -n "Processing EC2 user-data"
-            /usr/local/sbin/configinit $CONFFILE
-            echo .
-        else
-    		echo " failed."
-        fi
 	fi
 
 	# Whether we suceeded or not, delete the temporary file.

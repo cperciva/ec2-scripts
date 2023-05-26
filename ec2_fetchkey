@@ -19,7 +19,7 @@ rcvar=ec2_fetchkey_enable
 start_cmd="ec2_fetchkey_run"
 stop_cmd=":"
 
-SSHKEYURL="http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key"
+SSHKEYURL="latest/meta-data/public-keys/0/openssh-key"
 
 ec2_fetchkey_run()
 {
@@ -39,7 +39,8 @@ ec2_fetchkey_run()
 	mkdir -p `dirname ${SSHKEYFILE}`
 	chmod 700 `dirname ${SSHKEYFILE}`
 	chown ${ec2_fetchkey_user} `dirname ${SSHKEYFILE}`
-	ftp -o ${SSHKEYFILE}.ec2 -a ${SSHKEYURL} >/dev/null
+	# Instead of using ftp use our new tool
+	/usr/local/bin/aws-ec2-imdsv2-get ${SSHKEYURL} > ${SSHKEYFILE}.ec2 2>/dev/null
 	if [ -f ${SSHKEYFILE}.ec2 ]; then
 		touch ${SSHKEYFILE}
 		sort -u ${SSHKEYFILE} ${SSHKEYFILE}.ec2		\
@@ -47,22 +48,6 @@ ec2_fetchkey_run()
 		mv ${SSHKEYFILE}.tmp ${SSHKEYFILE}
 		chown ${ec2_fetchkey_user} ${SSHKEYFILE}
 		rm ${SSHKEYFILE}.ec2
-	else
-        # If we get here there is a likely-hood this is
-        # due to IMDSv2, so let's try with IMDSv2 auth
-        pkg install -y curl
-        TOKEN=`/usr/local/bin/curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
-        /usr/local/bin/curl -H "X-aws-ec2-metadata-token: $TOKEN" -o ${SSHKEYFILE}.ec2 ${SSHKEYURL} >/dev/null
-        if [ -f ${SSHKEYFILE}.ec2 ]; then
-    		touch ${SSHKEYFILE}
-    		sort -u ${SSHKEYFILE} ${SSHKEYFILE}.ec2		\
-    		    > ${SSHKEYFILE}.tmp
-    		mv ${SSHKEYFILE}.tmp ${SSHKEYFILE}
-    		chown ${ec2_fetchkey_user} ${SSHKEYFILE}
-    		#rm ${SSHKEYFILE}.ec2
-        else
-    		echo "Fetching SSH public key failed!"
-        fi
 	fi
 }
 
