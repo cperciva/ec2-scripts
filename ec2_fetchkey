@@ -19,7 +19,8 @@ rcvar=ec2_fetchkey_enable
 start_cmd="ec2_fetchkey_run"
 stop_cmd=":"
 
-SSHKEYURL="http://169.254.169.254/1.0/meta-data/public-keys/0/openssh-key"
+SSHKEYPATH="latest/meta-data/public-keys/0/openssh-key"
+IMDSV2GET="/usr/local/bin/aws-ec2-imdsv2-get"
 
 ec2_fetchkey_run()
 {
@@ -39,8 +40,8 @@ ec2_fetchkey_run()
 	mkdir -p `dirname ${SSHKEYFILE}`
 	chmod 700 `dirname ${SSHKEYFILE}`
 	chown ${ec2_fetchkey_user} `dirname ${SSHKEYFILE}`
-	ftp -o ${SSHKEYFILE}.ec2 -a ${SSHKEYURL} >/dev/null
-	if [ -f ${SSHKEYFILE}.ec2 ]; then
+	${IMDSV2GET} ${SSHKEYPATH} > ${SSHKEYFILE}.ec2
+	if [ $? = 0 ]; then
 		touch ${SSHKEYFILE}
 		sort -u ${SSHKEYFILE} ${SSHKEYFILE}.ec2		\
 		    > ${SSHKEYFILE}.tmp
@@ -49,6 +50,7 @@ ec2_fetchkey_run()
 		rm ${SSHKEYFILE}.ec2
 	else
 		echo "Fetching SSH public key failed!"
+		rm ${SSHKEYFILE}.ec2
 	fi
 }
 

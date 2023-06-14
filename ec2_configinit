@@ -16,14 +16,15 @@ rcvar=ec2_configinit_enable
 start_cmd="ec2_configinit_run"
 stop_cmd=":"
 
-CONFIGURL="http://169.254.169.254/latest/user-data"
+CONFIGPATH="latest/user-data"
+IMDSV2GET="/usr/local/bin/aws-ec2-imdsv2-get"
 
 ec2_configinit_run()
 {
 	# Download to a temporary location.
 	echo -n "Fetching EC2 user-data"
 	CONFFILE=`mktemp "${TMPDIR:-/tmp}/configinit.XXXXXX"`
-	fetch -o ${CONFFILE} ${CONFIGURL} 2>/dev/null
+	${IMDSV2GET} ${CONFIGPATH} > ${CONFFILE} 2>/dev/null
 
 	# If we succeeded, process it; otherwise report failure.
 	if [ $? = 0 ]; then
